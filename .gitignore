@@ -126,4 +126,5 @@ cython_debug/
 
 # Project-specific secrets and data
 Key.txt
-*.csv
+*.html
+*.png
