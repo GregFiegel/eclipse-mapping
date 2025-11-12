@@ -17,8 +17,14 @@ python shadow_history.py --output eclipse_shadow_history.html
 python shadow_forecast.py --output eclipse_shadow_forecast.html
 ```
 
-An HTML file such as `eclipse_shadow_2024_04_08.html` will be written to the
-current directory; open it with any browser.
+Each run writes an HTML shell plus a sibling JSON spec (e.g.
+`eclipse_shadow_2024_04_08.html` + `.json`). Keep
+Generated HTML will reference the local `plotly-2.27.0.min.js` /
+`plotly-geo-assets.min.js` files when they exist; otherwise, it automatically
+falls back to inlining Plotly so the map still works. Because the figure JSON is
+fetched lazily, view the pages via a local HTTP server (`python -m http.server`)
+instead of a raw `file://` URL. If you want to share a single HTML file, simply
+delete or move the JS bundles before exporting and the inline fallback kicks in.
 
 ## Command line reference
 
@@ -43,6 +49,8 @@ options:
 - `date` (positional): Calendar date in `YYYY-MM-DD`. Use a leading `-` for BCE, e.g. `-058-05-17`.
 - `--catalog PATH`: Point to an alternate CSV containing Besselian elements.
 - `--samples N`: Number of evaluation steps between `tmin` and `tmax`; higher values smooth the path but take longer.
+- `--centerline-step N`: Keep every `N`th centerline point when rendering (values >1 shrink the exported JSON/HTML while keeping the computation precise).
+- `--polygon-step N`: Keep every `N`th vertex along the corridor polygon.
 - `--output FILE`: Explicit name for the HTML artifact (defaults to `eclipse_shadow_<date>.html`; ignored when `--no-html` is set).
 - `--image-output FILE`: Write a static PNG/SVG/PDF image (requires the `kaleido` package).
 - `--no-html`: Skip HTML export; combine with `--image-output` if you only want an image.
@@ -92,7 +100,8 @@ non-interactive deliverables favor `--image-output`
 and increase `--image-scale` for higher resolution; use `--outline-only` if you
 just need to verify the borders without plotting data.
 When HTML payload size becomes unwieldy, use `--polygon-step N` to down-sample
-each polygon by keeping every Nth vertex.
+each polygon by keeping every Nth vertex. Coordinates are rounded to 4 decimal
+places before serialization to further shrink the GeoJSON.
 
 ```sh
 . .venv/bin/activate

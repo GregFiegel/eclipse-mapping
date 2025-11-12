@@ -128,3 +128,4 @@ cython_debug/
 Key.txt
 *.html
 *.png
+*.json

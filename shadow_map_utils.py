@@ -420,6 +420,67 @@ def decimate_polygon(
     return lat_filtered, lon_filtered
 
 
+def quantize_polygon(
+    latitudes: List[float], longitudes: List[float], decimals: int = 4
+) -> Tuple[List[float], List[float]]:
+    """Round polygon coordinates to the requested precision."""
+    if decimals < 0:
+        return latitudes, longitudes
+    return (
+        [round(value, decimals) for value in latitudes],
+        [round(value, decimals) for value in longitudes],
+    )
+
+
+def simplify_polygon_rdp(
+    latitudes: List[float], longitudes: List[float], tolerance: float
+) -> Tuple[List[float], List[float]]:
+    """Simplify polygon via Ramer-Douglas-Peucker (tolerance in degrees)."""
+    if tolerance <= 0 or len(latitudes) != len(longitudes) or len(latitudes) < 4:
+        return latitudes, longitudes
+
+    points = list(zip(latitudes, longitudes))
+    simplified = _rdp(points, tolerance)
+    if len(simplified) < 3:
+        return latitudes, longitudes
+    result_lat, result_lon = zip(*simplified)
+    return list(result_lat), list(result_lon)
+
+
+def _rdp(points: List[Tuple[float, float]], epsilon: float) -> List[Tuple[float, float]]:
+    if len(points) < 3:
+        return points
+    start = points[0]
+    end = points[-1]
+    index = -1
+    max_dist = -1.0
+    for i in range(1, len(points) - 1):
+        dist = _perpendicular_distance(points[i], start, end)
+        if dist > max_dist:
+            index = i
+            max_dist = dist
+    if max_dist > epsilon and index != -1:
+        left = _rdp(points[: index + 1], epsilon)
+        right = _rdp(points[index:], epsilon)
+        return left[:-1] + right
+    return [start, end]
+
+
+def _perpendicular_distance(
+    point: Tuple[float, float], start: Tuple[float, float], end: Tuple[float, float]
+) -> float:
+    if start == end:
+        return math.hypot(point[0] - start[0], point[1] - start[1])
+    num = abs(
+        (end[1] - start[1]) * point[0]
+        - (end[0] - start[0]) * point[1]
+        + end[0] * start[1]
+        - end[1] * start[0]
+    )
+    den = math.hypot(end[1] - start[1], end[0] - start[0])
+    return num / den
+
+
 def date_sort_key(event) -> float:
     return event.year * 10000 + event.month * 100 + event.day
 

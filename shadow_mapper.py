@@ -10,6 +10,8 @@ from typing import Dict, Iterable, List, Tuple
 
 import plotly.graph_objects as go
 
+from plot_writer import write_interactive_html
+
 CATALOG_FILE = Path("eclipse_besselian_from_mysqldump2.csv")
 EARTH_RADIUS_KM = 6378.137
 EARTH_FLATTENING = 1 / 298.257
@@ -74,6 +76,18 @@ def parse_args() -> argparse.Namespace:
         help="Number of samples between tmin and tmax used for the track",
     )
     parser.add_argument(
+        "--centerline-step",
+        type=int,
+        default=1,
+        help="Keep every Nth point along the centerline when rendering (use >1 to shrink output size).",
+    )
+    parser.add_argument(
+        "--polygon-step",
+        type=int,
+        default=1,
+        help="Keep every Nth vertex along the corridor boundary to reduce polygon size.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -100,6 +114,10 @@ def main() -> None:
             "HTML output disabled but no --image-output provided. "
             "Either drop --no-html or supply an image path."
         )
+    if args.centerline_step <= 0:
+        raise SystemExit("--centerline-step must be a positive integer.")
+    if args.polygon_step <= 0:
+        raise SystemExit("--polygon-step must be a positive integer.")
 
     catalog = load_catalog(args.catalog)
     target_key = normalize_date_key(args.date)
@@ -111,6 +129,8 @@ def main() -> None:
 
     event = catalog[target_key]
     centerline = compute_centerline(event, args.samples)
+    if args.centerline_step > 1:
+        centerline = centerline[:: args.centerline_step]
     if len(centerline) < 2:
         raise SystemExit(
             "Not enough valid samples to form a track. "
@@ -118,6 +138,8 @@ def main() -> None:
         )
 
     shadow_polygon = build_shadow_polygon(centerline)
+    shadow_polygon = simplify_polygon(shadow_polygon, args.polygon_step)
+    shadow_polygon = quantize_polygon(shadow_polygon, decimals=4)
     title = build_title(event)
 
     fig = render_map(centerline, shadow_polygon, title, event)
@@ -125,8 +147,12 @@ def main() -> None:
         f"eclipse_shadow_{args.date.replace('-', '_')}.html"
     )
     if not args.no_html:
-        fig.write_html(html_destination, include_plotlyjs="inline")
-        print(f"Wrote {html_destination.resolve()}")
+        write_interactive_html(
+            fig,
+            html_destination,
+            title=title,
+        )
+        print(f"Wrote {html_destination.resolve()} (JSON saved beside HTML)")
     if args.image_output:
         export_static_image(fig, args.image_output)
 
@@ -346,6 +372,8 @@ def render_map(
     event: CatalogEntry,
 ) -> go.Figure:
     fig = go.Figure()
+    line_lat = [round(pt.lat, 4) for pt in centerline]
+    line_lon = [round(pt.lon, 4) for pt in centerline]
 
     if polygon[0]:
         fig.add_trace(
@@ -366,8 +394,8 @@ def render_map(
     ]
     fig.add_trace(
         go.Scattergeo(
-            lat=[pt.lat for pt in centerline],
-            lon=[pt.lon for pt in centerline],
+            lat=line_lat,
+            lon=line_lon,
             mode="lines",
             line=dict(color="crimson", width=2),
             name="Center line",
@@ -410,6 +438,36 @@ def render_map(
         lonaxis=dict(showgrid=True, dtick=30),
     )
     return fig
+
+
+def simplify_polygon(
+    polygon: Tuple[List[float], List[float]], step: int
+) -> Tuple[List[float], List[float]]:
+    latitudes, longitudes = polygon
+    if step <= 1 or not latitudes or len(latitudes) != len(longitudes):
+        return polygon
+    if len(latitudes) < 4:
+        return polygon
+    indices = list(range(0, len(latitudes), step))
+    if indices[-1] != len(latitudes) - 1:
+        indices.append(len(latitudes) - 1)
+    lat_filtered = [latitudes[i] for i in indices]
+    lon_filtered = [longitudes[i] for i in indices]
+    if len(lat_filtered) < 3:
+        return polygon
+    return lat_filtered, lon_filtered
+
+
+def quantize_polygon(
+    polygon: Tuple[List[float], List[float]], decimals: int = 4
+) -> Tuple[List[float], List[float]]:
+    latitudes, longitudes = polygon
+    if decimals < 0 or not latitudes:
+        return polygon
+    return (
+        [round(value, decimals) for value in latitudes],
+        [round(value, decimals) for value in longitudes],
+    )
 
 
 def build_title(event: CatalogEntry) -> str:

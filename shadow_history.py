@@ -15,6 +15,7 @@ from shadow_mapper import (
     load_catalog,
     normalize_date_key,
 )
+from plot_writer import write_interactive_html
 from shadow_map_utils import (
     add_world_outline_trace,
     allow_eclipse_type,
@@ -25,6 +26,7 @@ from shadow_map_utils import (
     date_to_float,
     decimate_polygon,
     format_event_date,
+    quantize_polygon,
     resolve_cutoff,
     scale_years,
 )
@@ -161,8 +163,12 @@ def main() -> None:
         )
         apply_geo_styling(figure)
         if not args.no_html:
-            figure.write_html(args.output, include_plotlyjs="inline")
-            print(f"Wrote {args.output.resolve()}")
+            write_interactive_html(
+                figure,
+                args.output,
+                title="World Outline Debug",
+            )
+            print(f"Wrote {args.output.resolve()} (JSON saved beside HTML)")
         if args.image_output:
             export_static_image(figure, args.image_output, scale=args.image_scale)
         return
@@ -222,6 +228,7 @@ def main() -> None:
             latitudes, longitudes = decimate_polygon(
                 latitudes, longitudes, args.polygon_step
             )
+        latitudes, longitudes = quantize_polygon(latitudes, longitudes)
         if len(latitudes) < 3:
             skipped += 1
             continue
@@ -322,8 +329,12 @@ def main() -> None:
     )
     apply_geo_styling(figure)
     if not args.no_html:
-        figure.write_html(args.output, include_plotlyjs="inline")
-        print(f"Wrote {args.output.resolve()}")
+        write_interactive_html(
+            figure,
+            args.output,
+            title="Time Since Total Solar Eclipse",
+        )
+        print(f"Wrote {args.output.resolve()} (JSON saved beside HTML)")
     if args.image_output:
         export_static_image(figure, args.image_output, scale=args.image_scale)
 
