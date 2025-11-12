@@ -26,6 +26,22 @@ fetched lazily, view the pages via a local HTTP server (`python -m http.server`)
 instead of a raw `file://` URL. If you want to share a single HTML file, simply
 delete or move the JS bundles before exporting and the inline fallback kicks in.
 
+## Preview gallery
+
+Community-favorite configurations at a glance (screenshots live in `assets/` if you want to regenerate them).
+
+![Global history heatmap](assets/history_image.png)
+*Years since a total eclipse, using the default power-scaled colors.*
+
+![Saros-colored history map](assets/saros_history_image.png)
+*`--color-by-saros` emphasizes how each Saros series crisscrosses the globe.*
+
+![Forecast wait time](assets/future_image.png)
+*Time until the next total eclipse for every location.*
+
+![Saros-colored forecast map](assets/saros_future_image.png)
+*Forward-looking Saros view showing which series will next visit each region.*
+
 ## Command line reference
 
 ```
