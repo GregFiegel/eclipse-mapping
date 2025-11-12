@@ -17,15 +17,19 @@ from shadow_mapper import (
 )
 from shadow_map_utils import (
     add_world_outline_trace,
+    allow_eclipse_type,
     apply_geo_styling,
     build_geojson_polygon,
     build_power_colorbar_ticks,
     date_sort_key,
     date_to_float,
+    decimate_polygon,
     format_event_date,
     resolve_cutoff,
     scale_years,
 )
+
+TRANSPARENT_SCALE = [[0, "rgba(0,0,0,0)"], [1, "rgba(0,0,0,0)"]]
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,6 +115,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--include-annular",
+        action="store_true",
+        help="Include annular eclipses (default renders only total/hybrid events).",
+    )
+    parser.add_argument(
+        "--polygon-step",
+        type=int,
+        default=1,
+        help=(
+            "Keep every Nth vertex when building polygons (set >1 to down-sample "
+            "GeoJSON and shrink HTML file size)."
+        ),
+    )
+    parser.add_argument(
         "--outline-only",
         action="store_true",
         help="Skip eclipse rendering and output just the map outline for debugging.",
@@ -131,6 +149,8 @@ def main() -> None:
         raise SystemExit("--years-back must be positive.")
     if args.color_exponent <= 0:
         raise SystemExit("--color-exponent must be positive.")
+    if args.polygon_step <= 0:
+        raise SystemExit("--polygon-step must be a positive integer.")
 
     if args.outline_only:
         figure = go.Figure()
@@ -151,6 +171,10 @@ def main() -> None:
     events = sorted(catalog.values(), key=date_sort_key)
     if not events:
         raise SystemExit("Catalog did not yield any eclipses to plot.")
+    events = [evt for evt in events if allow_eclipse_type(evt, args.include_annular)]
+    if not events:
+        msg = "No total eclipses available; pass --include-annular to include annular tracks."
+        raise SystemExit(msg)
     cutoff_value, cutoff_label, cutoff_float = resolve_cutoff(
         args.max_date, args.include_future
     )
@@ -184,10 +208,7 @@ def main() -> None:
     oldest = min(date_values)
     span = newest - oldest if newest != oldest else 1.0
 
-    features: List[dict] = []
-    feature_ids: List[str] = []
-    feature_values: List[float] = []
-    hover_texts: List[str] = []
+    records: List[dict] = []
     skipped = 0
 
     for idx, (event, dv) in enumerate(zip(events, date_values), start=1):
@@ -197,6 +218,10 @@ def main() -> None:
             skipped += 1
             continue
         latitudes, longitudes = polygon
+        if args.polygon_step > 1:
+            latitudes, longitudes = decimate_polygon(
+                latitudes, longitudes, args.polygon_step
+            )
         if len(latitudes) < 3:
             skipped += 1
             continue
@@ -207,39 +232,49 @@ def main() -> None:
         if not geometry:
             continue
         feature_id = f"{event.year}_{event.month:02d}_{event.day:02d}_{idx}"
-        features.append(
+        records.append(
             {
-                "type": "Feature",
+                "feature": {
+                    "type": "Feature",
+                    "id": feature_id,
+                    "properties": {"hover": hover},
+                    "geometry": geometry,
+                },
                 "id": feature_id,
-                "properties": {"hover": hover},
-                "geometry": geometry,
+                "value": years_since,
+                "hover": hover,
             }
         )
-        feature_ids.append(feature_id)
-        feature_values.append(years_since)
-        hover_texts.append(hover)
 
         if idx % 100 == 0 or idx == len(events):
             print(f"Processed {idx}/{len(events)} eclipses (skipped {skipped})")
 
-    if not features:
+    if not records:
         raise SystemExit("No valid eclipse polygons to plot after filtering.")
 
-    scaled_values = [scale_years(value, args.color_exponent) for value in feature_values]
+    scaled_values = [scale_years(record["value"], args.color_exponent) for record in records]
     color_min = min(scaled_values)
     color_max = max(scaled_values)
     if color_max == color_min:
         color_max = color_min + 1e-9
     tickvals, ticktext = build_power_colorbar_ticks(span, args.color_exponent)
     exponent_label = f"{args.color_exponent:g}"
+    for record, scaled in zip(records, scaled_values):
+        record["scaled"] = scaled
+
+    color_records = sorted(records, key=lambda rec: rec["value"], reverse=True)
+    hover_records = sorted(records, key=lambda rec: rec["value"])
 
     figure = go.Figure()
     figure.add_trace(
         go.Choropleth(
-            geojson={"type": "FeatureCollection", "features": features},
+            geojson={
+                "type": "FeatureCollection",
+                "features": [rec["feature"] for rec in color_records],
+            },
             featureidkey="id",
-            locations=feature_ids,
-            z=scaled_values,
+            locations=[rec["id"] for rec in color_records],
+            z=[rec["scaled"] for rec in color_records],
             zmin=color_min,
             zmax=color_max,
             colorscale=args.colorscale,
@@ -249,8 +284,25 @@ def main() -> None:
                 tickvals=tickvals,
                 ticktext=ticktext,
             ),
+            hoverinfo="skip",
+            marker=dict(line=dict(color="rgba(0, 0, 0, 0)", width=0)),
+        )
+    )
+    figure.add_trace(
+        go.Choropleth(
+            geojson={
+                "type": "FeatureCollection",
+                "features": [rec["feature"] for rec in hover_records],
+            },
+            featureidkey="id",
+            locations=[rec["id"] for rec in hover_records],
+            z=[rec["scaled"] for rec in hover_records],
+            zmin=color_min,
+            zmax=color_max,
+            colorscale=TRANSPARENT_SCALE,
+            showscale=False,
             hoverinfo="text",
-            text=hover_texts,
+            text=[rec["hover"] for rec in hover_records],
             marker=dict(line=dict(color="rgba(0, 0, 0, 0)", width=0)),
         )
     )

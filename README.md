@@ -86,9 +86,13 @@ ignores eclipses dated after the current day so the color scale reflects “year
 since” relative to *now*; pass `--include-future` (or pick a custom
 `--max-date`) if you want to push the end date farther out. Combine this with
 `--years-back N` to focus on only the last `N` years relative to whatever end
-date you chose. For fast, non-interactive deliverables favor `--image-output`
+date you chose. Only total (and hybrid) eclipses are rendered by default; pass
+`--include-annular` to bring annular paths back into the visualization. For fast,
+non-interactive deliverables favor `--image-output`
 and increase `--image-scale` for higher resolution; use `--outline-only` if you
 just need to verify the borders without plotting data.
+When HTML payload size becomes unwieldy, use `--polygon-step N` to down-sample
+each polygon by keeping every Nth vertex.
 
 ```sh
 . .venv/bin/activate
@@ -112,6 +116,8 @@ the dataset.
 - `--outline-only`: Emit just the base map outline (useful for confirming the overlay draws correctly).
 - `--colorscale NAME`: Plotly colorscale to encode “years since” (e.g. `Viridis`, `Inferno`, `Turbo`).
 - `--color-exponent X`: Power-law applied to the numeric values before coloring (defaults to `0.5`). Values between `0` and `1` emphasize recent eclipses; values above `1` spread out older ones.
+- `--include-annular`: Include annular eclipses alongside totals/hybrids (totals-only by default to favor fully dark paths).
+- `--polygon-step N`: Keep every Nth vertex when serializing polygons (use values >1 to shrink HTML/GeoJSON size).
 - `--output FILE`: Destination HTML file for the combined map (default `eclipse_shadow_history.html`; ignored when `--no-html` is set).
 - `--image-output FILE`: Write a static PNG/SVG/PDF snapshot (requires `kaleido`).
 - `--image-scale N`: Multiply the static-image resolution by `N` (e.g., `2` doubles both width and height for a sharper export; defaults to `1.0`).
@@ -121,10 +127,12 @@ the dataset.
 
 `shadow_forecast.py` is effectively the mirror image of the history view: it
 starts at today (or any `--min-date` you pass) and works forward through the
-catalog, shading each location by how long it will wait until the next solar
-eclipse in the dataset. Color scaling uses the same `--color-exponent` power
-transform as the history map so you can match the visual weight applied to
-near-term events.
+catalog, shading each location by how long it will wait until its next total
+solar eclipse in the dataset. Use `--include-annular` if you want to bring
+annular tracks back into the forecast, and `--polygon-step` to throttle GeoJSON
+size the same way as the history map. Color scaling uses the same
+`--color-exponent` power transform as the history map so you can match the
+visual weight applied to near-term events.
 
 ```sh
 . .venv/bin/activate
@@ -139,4 +147,6 @@ python shadow_forecast.py --samples 160 \
 - `--years-forward N`: Only include eclipses within `N` years of the start date.
 - `--max-events N`: Cap the number of eclipses processed (useful while iterating).
 - `--colorscale NAME` / `--color-exponent X`: Same behavior as `shadow_history.py`, except the color bar reads “years until”.
+- `--include-annular`: Include annular events (default keeps the focus on total/hybrid eclipses).
+- `--polygon-step N`: Keep every Nth vertex when serializing polygons (use values >1 to shrink HTML/GeoJSON size).
 - `--samples`, `--output`, `--image-output`, `--image-scale`, `--no-html`, and `--outline-only` behave exactly like the history script equivalents.

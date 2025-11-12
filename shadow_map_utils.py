@@ -6,9 +6,265 @@ from typing import List, Tuple
 
 import plotly.graph_objects as go
 
-from shadow_mapper import normalize_date_key
+from shadow_mapper import CatalogEntry, normalize_date_key
 
 _COUNTRY_CODES_CACHE: List[str] | None = None
+
+# ISO-3 codes covering modern sovereign states and territories. Plotly's gapminder
+# sample omits several countries (e.g., DPRK, many former USSR republics), so we
+# seed the outline set with this comprehensive list and union it with whatever
+# the optional px dataset provides.
+DEFAULT_COUNTRY_CODES = [
+    "AFG",
+    "ALA",
+    "ALB",
+    "DZA",
+    "ASM",
+    "AND",
+    "AGO",
+    "AIA",
+    "ATA",
+    "ATG",
+    "ARG",
+    "ARM",
+    "ABW",
+    "AUS",
+    "AUT",
+    "AZE",
+    "BHS",
+    "BHR",
+    "BGD",
+    "BRB",
+    "BLR",
+    "BEL",
+    "BLZ",
+    "BEN",
+    "BMU",
+    "BTN",
+    "BOL",
+    "BES",
+    "BIH",
+    "BWA",
+    "BVT",
+    "BRA",
+    "IOT",
+    "BRN",
+    "BGR",
+    "BFA",
+    "BDI",
+    "CPV",
+    "KHM",
+    "CMR",
+    "CAN",
+    "CYM",
+    "CAF",
+    "TCD",
+    "CHL",
+    "CHN",
+    "CXR",
+    "CCK",
+    "COL",
+    "COM",
+    "COG",
+    "COD",
+    "COK",
+    "CRI",
+    "CIV",
+    "HRV",
+    "CUB",
+    "CUW",
+    "CYP",
+    "CZE",
+    "DNK",
+    "DJI",
+    "DMA",
+    "DOM",
+    "ECU",
+    "EGY",
+    "SLV",
+    "GNQ",
+    "ERI",
+    "EST",
+    "SWZ",
+    "ETH",
+    "FLK",
+    "FRO",
+    "FJI",
+    "FIN",
+    "FRA",
+    "GUF",
+    "PYF",
+    "ATF",
+    "GAB",
+    "GMB",
+    "GEO",
+    "DEU",
+    "GHA",
+    "GIB",
+    "GRC",
+    "GRL",
+    "GRD",
+    "GLP",
+    "GUM",
+    "GTM",
+    "GGY",
+    "GIN",
+    "GNB",
+    "GUY",
+    "HTI",
+    "HMD",
+    "VAT",
+    "HND",
+    "HKG",
+    "HUN",
+    "ISL",
+    "IND",
+    "IDN",
+    "IRN",
+    "IRQ",
+    "IRL",
+    "IMN",
+    "ISR",
+    "ITA",
+    "JAM",
+    "JPN",
+    "JEY",
+    "JOR",
+    "KAZ",
+    "KEN",
+    "KIR",
+    "PRK",
+    "KOR",
+    "KWT",
+    "KGZ",
+    "LAO",
+    "LVA",
+    "LBN",
+    "LSO",
+    "LBR",
+    "LBY",
+    "LIE",
+    "LTU",
+    "LUX",
+    "MAC",
+    "MDG",
+    "MWI",
+    "MYS",
+    "MDV",
+    "MLI",
+    "MLT",
+    "MHL",
+    "MTQ",
+    "MRT",
+    "MUS",
+    "MYT",
+    "MEX",
+    "FSM",
+    "MDA",
+    "MCO",
+    "MNG",
+    "MNE",
+    "MSR",
+    "MAR",
+    "MOZ",
+    "MMR",
+    "NAM",
+    "NRU",
+    "NPL",
+    "NLD",
+    "NCL",
+    "NZL",
+    "NIC",
+    "NER",
+    "NGA",
+    "NIU",
+    "NFK",
+    "MKD",
+    "MNP",
+    "NOR",
+    "OMN",
+    "PAK",
+    "PLW",
+    "PSE",
+    "PAN",
+    "PNG",
+    "PRY",
+    "PER",
+    "PHL",
+    "PCN",
+    "POL",
+    "PRT",
+    "PRI",
+    "QAT",
+    "REU",
+    "ROU",
+    "RUS",
+    "RWA",
+    "BLM",
+    "SHN",
+    "KNA",
+    "LCA",
+    "MAF",
+    "SPM",
+    "VCT",
+    "WSM",
+    "SMR",
+    "STP",
+    "SAU",
+    "SEN",
+    "SRB",
+    "SYC",
+    "SLE",
+    "SGP",
+    "SXM",
+    "SVK",
+    "SVN",
+    "SLB",
+    "SOM",
+    "ZAF",
+    "SGS",
+    "SSD",
+    "ESP",
+    "LKA",
+    "SDN",
+    "SUR",
+    "SJM",
+    "SWE",
+    "CHE",
+    "SYR",
+    "TWN",
+    "TJK",
+    "TZA",
+    "THA",
+    "TLS",
+    "TGO",
+    "TKL",
+    "TON",
+    "TTO",
+    "TUN",
+    "TUR",
+    "TKM",
+    "TCA",
+    "TUV",
+    "UGA",
+    "UKR",
+    "ARE",
+    "GBR",
+    "USA",
+    "UMI",
+    "URY",
+    "UZB",
+    "VUT",
+    "VEN",
+    "VNM",
+    "VGB",
+    "VIR",
+    "WLF",
+    "ESH",
+    "YEM",
+    "ZMB",
+    "ZWE",
+]
 
 
 def add_world_outline_trace(fig: go.Figure) -> None:
@@ -37,22 +293,24 @@ def get_country_codes() -> List[str]:
     global _COUNTRY_CODES_CACHE
     if _COUNTRY_CODES_CACHE is not None:
         return _COUNTRY_CODES_CACHE
+
+    codes = {code.strip().upper() for code in DEFAULT_COUNTRY_CODES if code}
     try:
         import plotly.express as px
-    except ImportError:
-        print("plotly.express unavailable; skipping outline overlay.")
-        _COUNTRY_CODES_CACHE = []
-        return _COUNTRY_CODES_CACHE
 
-    frame = px.data.gapminder()
-    codes = sorted(
-        {
-            code
-            for code in frame["iso_alpha"]
-            if isinstance(code, str) and code and code.upper() != "NA"
-        }
-    )
-    _COUNTRY_CODES_CACHE = codes
+        frame = px.data.gapminder()
+        codes.update(
+            {
+                code.strip().upper()
+                for code in frame["iso_alpha"]
+                if isinstance(code, str) and code and code.upper() != "NA"
+            }
+        )
+    except ImportError:
+        print("plotly.express unavailable; using built-in ISO code list for outlines.")
+
+    codes.discard("")
+    _COUNTRY_CODES_CACHE = sorted(codes)
     return _COUNTRY_CODES_CACHE
 
 
@@ -135,6 +393,31 @@ def scale_years(value: float, exponent: float) -> float:
     if value <= 0:
         return 0.0
     return value**exponent
+
+
+def allow_eclipse_type(event: CatalogEntry, include_annular: bool) -> bool:
+    """Return True when the event's eclipse_type should be rendered."""
+    etype = (event.eclipse_type or "").strip().upper()
+    total_like = {"T", "H"}  # Hybrids still produce a total track.
+    if include_annular:
+        total_like.add("A")
+    return etype in total_like
+
+
+def decimate_polygon(
+    latitudes: List[float], longitudes: List[float], step: int
+) -> Tuple[List[float], List[float]]:
+    """Down-sample polygon points by keeping every nth vertex."""
+    if step <= 1 or len(latitudes) < 4 or len(latitudes) != len(longitudes):
+        return latitudes, longitudes
+    indices = list(range(0, len(latitudes), step))
+    if indices[-1] != len(latitudes) - 1:
+        indices.append(len(latitudes) - 1)
+    lat_filtered = [latitudes[i] for i in indices]
+    lon_filtered = [longitudes[i] for i in indices]
+    if len(lat_filtered) < 3:
+        return latitudes, longitudes
+    return lat_filtered, lon_filtered
 
 
 def date_sort_key(event) -> float:
