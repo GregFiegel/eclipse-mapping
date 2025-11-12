@@ -8,11 +8,13 @@ map showing the center line plus an approximate totality/annularity corridor.
 ## Quick start
 
 ```sh
-cd "/home/greg/Projects/Eclipse Mapping"
 python -m venv .venv
 . .venv/bin/activate
 pip install plotly kaleido
 python shadow_mapper.py 2024-04-08
+# Optional global maps
+python shadow_history.py --output eclipse_shadow_history.html
+python shadow_forecast.py --output eclipse_shadow_forecast.html
 ```
 
 An HTML file such as `eclipse_shadow_2024_04_08.html` will be written to the
@@ -73,21 +75,9 @@ approximation—the exact grazing limits would require solving the full Besselia
 system with the w=0 constraint; the current approach is sufficient for visual
 inspection but should not be used for precise local circumstances.
 
-## Testing
-
-Two quick sanity checks were run after implementation:
-
-```sh
-. .venv/bin/activate
-python shadow_mapper.py 2017-08-21 --samples 300
-python shadow_mapper.py 2024-04-08 --samples 400
-```
-
-Each command produced a map without runtime errors.
-
 ## Global coverage map
 
-`shadow_history.py` now renders a single choropleth layer built from the union
+`shadow_history.py` renders a single choropleth layer built from the union
 of all eclipse polygons, which keeps file sizes manageable and guarantees a
 consistent color scale. Each polygon is encoded in the GeoJSON payload so the
 hover text still shows the individual event info, and a final country-outline
@@ -121,7 +111,32 @@ the dataset.
 - `--years-back N`: Only include eclipses that occurred within the last `N` years relative to the effective end date (default current day unless you pass `--include-future` or `--max-date`).
 - `--outline-only`: Emit just the base map outline (useful for confirming the overlay draws correctly).
 - `--colorscale NAME`: Plotly colorscale to encode “years since” (e.g. `Viridis`, `Inferno`, `Turbo`).
+- `--color-exponent X`: Power-law applied to the numeric values before coloring (defaults to `0.5`). Values between `0` and `1` emphasize recent eclipses; values above `1` spread out older ones.
 - `--output FILE`: Destination HTML file for the combined map (default `eclipse_shadow_history.html`; ignored when `--no-html` is set).
 - `--image-output FILE`: Write a static PNG/SVG/PDF snapshot (requires `kaleido`).
 - `--image-scale N`: Multiply the static-image resolution by `N` (e.g., `2` doubles both width and height for a sharper export; defaults to `1.0`).
 - `--no-html`: Suppress HTML output (useful when only emitting an image).
+
+## Future coverage map
+
+`shadow_forecast.py` is effectively the mirror image of the history view: it
+starts at today (or any `--min-date` you pass) and works forward through the
+catalog, shading each location by how long it will wait until the next solar
+eclipse in the dataset. Color scaling uses the same `--color-exponent` power
+transform as the history map so you can match the visual weight applied to
+near-term events.
+
+```sh
+. .venv/bin/activate
+python shadow_forecast.py --samples 160 \
+    --output eclipse_shadow_forecast.html
+```
+
+### shadow_forecast.py option highlights
+
+- `--min-date YYYY-MM-DD`: Start date for the forecast window (defaults to the current day; prefix BCE years with `-`).
+- `--max-date YYYY-MM-DD`: Optional ceiling for the forecast window (must be ≥ the start date).
+- `--years-forward N`: Only include eclipses within `N` years of the start date.
+- `--max-events N`: Cap the number of eclipses processed (useful while iterating).
+- `--colorscale NAME` / `--color-exponent X`: Same behavior as `shadow_history.py`, except the color bar reads “years until”.
+- `--samples`, `--output`, `--image-output`, `--image-scale`, `--no-html`, and `--outline-only` behave exactly like the history script equivalents.

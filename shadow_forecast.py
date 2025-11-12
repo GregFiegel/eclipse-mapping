@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 import plotly.graph_objects as go
 
 from shadow_mapper import (
     CATALOG_FILE,
     CatalogEntry,
-    export_static_image,
     build_shadow_polygon,
     compute_centerline,
+    export_static_image,
     load_catalog,
     normalize_date_key,
 )
@@ -20,10 +20,11 @@ from shadow_map_utils import (
     apply_geo_styling,
     build_geojson_polygon,
     build_power_colorbar_ticks,
+    date_key_to_sort_value,
     date_sort_key,
     date_to_float,
     format_event_date,
-    resolve_cutoff,
+    resolve_future_start,
     scale_years,
 )
 
@@ -31,8 +32,8 @@ from shadow_map_utils import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Render a global map showing when each location on Earth "
-            "was most recently in the Moon's shadow."
+            "Render a global map showing how long every location must wait "
+            "until its next visit from the Moon's shadow."
         )
     )
     parser.add_argument(
@@ -51,26 +52,26 @@ def parse_args() -> argparse.Namespace:
         "--max-events",
         type=int,
         default=None,
-        help="Optional cap on the number of eclipses processed (oldest first) for testing.",
+        help="Optional cap on the number of eclipses processed (farthest future first).",
     )
     parser.add_argument(
         "--colorscale",
         default="Viridis",
-        help="Plotly colorscale name used for the age gradient.",
+        help="Plotly colorscale name used for the wait-time gradient.",
     )
     parser.add_argument(
         "--color-exponent",
         type=float,
         default=0.5,
         help=(
-            "Exponent applied to years-since values for color scaling. "
-            "Values between 0 and 1 compress older eclipses, boosting recent ones."
+            "Exponent applied to years-until values for color scaling. "
+            "Values between 0 and 1 compress far-future eclipses, boosting near-term ones."
         ),
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("eclipse_shadow_history.html"),
+        default=Path("eclipse_shadow_forecast.html"),
         help="Destination HTML file for the combined map.",
     )
     parser.add_argument(
@@ -91,22 +92,23 @@ def parse_args() -> argparse.Namespace:
         help="Skip HTML export (useful when only --image-output is needed).",
     )
     parser.add_argument(
+        "--min-date",
+        type=str,
+        default=None,
+        help="Earliest calendar date to consider (default: today). Prefix BCE years with '-'.",
+    )
+    parser.add_argument(
         "--max-date",
         type=str,
         default=None,
-        help="Only include eclipses on or before YYYY-MM-DD (prefix BCE years with '-').",
+        help="Optional latest date to include (prefix BCE years with '-').",
     )
     parser.add_argument(
-        "--include-future",
-        action="store_true",
-        help="Process eclipses beyond today (overrides the default present-day cutoff).",
-    )
-    parser.add_argument(
-        "--years-back",
+        "--years-forward",
         type=float,
         default=None,
         help=(
-            "Only render eclipses within this many years before the effective end date "
+            "Only render eclipses within this many years after the start date "
             "(defaults to unlimited)."
         ),
     )
@@ -127,62 +129,61 @@ def main() -> None:
         )
     if args.image_scale <= 0:
         raise SystemExit("--image-scale must be positive.")
-    if args.years_back is not None and args.years_back <= 0:
-        raise SystemExit("--years-back must be positive.")
     if args.color_exponent <= 0:
         raise SystemExit("--color-exponent must be positive.")
+    if args.years_forward is not None and args.years_forward <= 0:
+        raise SystemExit("--years-forward must be positive.")
 
     if args.outline_only:
-        figure = go.Figure()
-        add_world_outline_trace(figure)
-        figure.update_layout(
-            title="World Outline Debug",
-            margin=dict(l=0, r=0, t=60, b=0),
-        )
-        apply_geo_styling(figure)
-        if not args.no_html:
-            figure.write_html(args.output, include_plotlyjs="inline")
-            print(f"Wrote {args.output.resolve()}")
-        if args.image_output:
-            export_static_image(figure, args.image_output, scale=args.image_scale)
+        outline_only(args)
         return
 
     catalog = load_catalog(args.catalog)
     events = sorted(catalog.values(), key=date_sort_key)
     if not events:
         raise SystemExit("Catalog did not yield any eclipses to plot.")
-    cutoff_value, cutoff_label, cutoff_float = resolve_cutoff(
-        args.max_date, args.include_future
-    )
-    if cutoff_value is not None:
-        print(f"Using eclipses through {cutoff_label}.")
-        events = [evt for evt in events if date_sort_key(evt) <= cutoff_value]
-        if not events:
-            raise SystemExit(f"No eclipses occur on or before {cutoff_label}.")
 
-    years_window_label = None
-    if args.years_back is not None:
-        window_end_label = cutoff_label or format_event_date(events[-1])
-        end_float = cutoff_float if cutoff_float is not None else date_to_float(events[-1])
-        min_float = end_float - args.years_back
-        events = [evt for evt in events if date_to_float(evt) >= min_float]
+    start_value, start_label, start_float = resolve_future_start(args.min_date)
+    events = [evt for evt in events if date_sort_key(evt) >= start_value]
+    if not events:
+        label = args.min_date or "today"
+        raise SystemExit(f"No eclipses occur on or after {label}.")
+
+    end_label = None
+    if args.max_date:
+        normalized_end = normalize_date_key(args.max_date)
+        end_value = date_key_to_sort_value(normalized_end)
+        if end_value < start_value:
+            raise SystemExit("--max-date must be on or after the start date.")
+        end_label = normalized_end
+        events = [evt for evt in events if date_sort_key(evt) <= end_value]
         if not events:
             raise SystemExit(
-                f"No eclipses found within the last {args.years_back:g} years "
-                f"ending {window_end_label}."
+                f"No eclipses occur between {start_label} and {end_label}."
             )
-        years_window_label = f"Last {args.years_back:g} years (ending {window_end_label})"
+
+    years_window_label = None
+    if args.years_forward is not None:
+        max_float = start_float + args.years_forward
+        events = [evt for evt in events if date_to_float(evt) <= max_float]
+        if not events:
+            raise SystemExit(
+                f"No eclipses occur within the next {args.years_forward:g} years "
+                f"starting {start_label}."
+            )
+        years_window_label = f"Next {args.years_forward:g} years (starting {start_label})"
         print(f"Restricting to the {years_window_label}.")
 
+    # Draw distant eclipses first so near-term ones render on top.
+    events.sort(key=date_sort_key, reverse=True)
     if args.max_events:
         events = events[: args.max_events]
     if not events:
-        raise SystemExit("Catalog did not yield any eclipses to plot.")
+        raise SystemExit("Catalog did not yield any eclipses to plot in the requested window.")
 
     date_values = [date_to_float(evt) for evt in events]
-    newest = max(date_values)
-    oldest = min(date_values)
-    span = newest - oldest if newest != oldest else 1.0
+    furthest = max(date_values)
+    max_years_ahead = max(furthest - start_float, 0.0)
 
     features: List[dict] = []
     feature_ids: List[str] = []
@@ -201,8 +202,8 @@ def main() -> None:
             skipped += 1
             continue
 
-        years_since = newest - dv
-        hover = format_hover(event, years_since)
+        years_until = max(dv - start_float, 0.0)
+        hover = format_forecast_hover(event, years_until)
         geometry = build_geojson_polygon(latitudes, longitudes)
         if not geometry:
             continue
@@ -216,7 +217,7 @@ def main() -> None:
             }
         )
         feature_ids.append(feature_id)
-        feature_values.append(years_since)
+        feature_values.append(years_until)
         hover_texts.append(hover)
 
         if idx % 100 == 0 or idx == len(events):
@@ -230,7 +231,8 @@ def main() -> None:
     color_max = max(scaled_values)
     if color_max == color_min:
         color_max = color_min + 1e-9
-    tickvals, ticktext = build_power_colorbar_ticks(span, args.color_exponent)
+    max_years = max(feature_values) if feature_values else 0.0
+    tickvals, ticktext = build_power_colorbar_ticks(max_years, args.color_exponent)
     exponent_label = f"{args.color_exponent:g}"
 
     figure = go.Figure()
@@ -245,7 +247,7 @@ def main() -> None:
             colorscale=args.colorscale,
             showscale=True,
             colorbar=dict(
-                title=f"Years since last eclipse (exp {exponent_label})",
+                title=f"Years until next eclipse (exp {exponent_label})",
                 tickvals=tickvals,
                 ticktext=ticktext,
             ),
@@ -255,13 +257,15 @@ def main() -> None:
         )
     )
     add_world_outline_trace(figure)
+
     title_lines = [
-        "Time Since Total Solar Eclipse",
-        "<sup>Brighter colors = longer since the last eclipse at that location</sup>",
-        f"<sup>Power color scale (exp {exponent_label}) highlights recent eclipses</sup>",
+        "Time Until Next Total Solar Eclipse",
+        "<sup>Darker colors = sooner eclipses for that location</sup>",
+        f"<sup>Power color scale (exp {exponent_label}) highlights near-term coverage</sup>",
+        f"<sup>Forecast window starts {start_label}</sup>",
     ]
-    if cutoff_label:
-        title_lines.append(f"<sup>Catalog through {cutoff_label}</sup>")
+    if end_label:
+        title_lines.append(f"<sup>Forecast capped at {end_label}</sup>")
     if years_window_label:
         title_lines.append(f"<sup>{years_window_label}</sup>")
     figure.update_layout(
@@ -276,11 +280,26 @@ def main() -> None:
         export_static_image(figure, args.image_output, scale=args.image_scale)
 
 
-def format_hover(event: CatalogEntry, years_since: float) -> str:
+def outline_only(args: argparse.Namespace) -> None:
+    figure = go.Figure()
+    add_world_outline_trace(figure)
+    figure.update_layout(
+        title="World Outline Debug",
+        margin=dict(l=0, r=0, t=60, b=0),
+    )
+    apply_geo_styling(figure)
+    if not args.no_html:
+        figure.write_html(args.output, include_plotlyjs="inline")
+        print(f"Wrote {args.output.resolve()}")
+    if args.image_output:
+        export_static_image(figure, args.image_output, scale=args.image_scale)
+
+
+def format_forecast_hover(event: CatalogEntry, years_until: float) -> str:
     date_label = format_event_date(event)
     return (
         f"{date_label} ({event.eclipse_type})<br>"
-        f"Years since: {years_since:,.1f}<br>"
+        f"Years until: {years_until:,.1f}<br>"
         f"Path width: {event.path_width_km:.0f} km"
     )
 
