@@ -1,12 +1,40 @@
 from __future__ import annotations
 
+import colorsys
 import math
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import plotly.graph_objects as go
 
 from shadow_mapper import CatalogEntry, normalize_date_key
+
+SAROS_BASE_COLORS = [
+    (31, 119, 180),
+    (255, 127, 14),
+    (44, 160, 44),
+    (214, 39, 40),
+    (148, 103, 189),
+    (140, 86, 75),
+    (227, 119, 194),
+    (127, 127, 127),
+    (188, 189, 34),
+    (23, 190, 207),
+    (57, 59, 121),
+    (82, 84, 163),
+    (107, 174, 214),
+    (49, 163, 84),
+    (116, 196, 118),
+    (166, 118, 29),
+    (231, 186, 82),
+    (173, 73, 74),
+    (214, 97, 107),
+    (142, 124, 195),
+    (196, 156, 213),
+    (140, 150, 198),
+    (136, 86, 167),
+    (199, 120, 186),
+]
 
 _COUNTRY_CODES_CACHE: List[str] | None = None
 
@@ -393,6 +421,82 @@ def scale_years(value: float, exponent: float) -> float:
     if value <= 0:
         return 0.0
     return value**exponent
+
+
+def prepare_saros_coloring(
+    series_ids: Sequence[int | None],
+    *,
+    full_opacity: bool = False,
+) -> Tuple[
+    dict[int, int], List[List[float | str]], float, float, List[float], List[str]
+]:
+    """Return color mapping plus a discrete colorscale and labeled tick marks."""
+    if not series_ids:
+        raise SystemExit("Saros coloring requested but no events were available.")
+    if any(series is None for series in series_ids):
+        raise SystemExit(
+            "Saros coloring requested but one or more catalog entries lacked a Saros number."
+        )
+    unique_series = sorted({series for series in series_ids if series is not None})
+    if not unique_series:
+        raise SystemExit(
+            "Saros coloring requested but no Saros numbers were found in the catalog."
+        )
+    mapping = {series: idx for idx, series in enumerate(unique_series)}
+    palette = _generate_color_palette(
+        len(unique_series), opacity=1.0 if full_opacity else 0.5
+    )
+    colorscale = _build_discrete_colorscale(palette)
+    zmin = -0.5
+    zmax = len(unique_series) - 0.5 if len(unique_series) > 1 else 0.5
+    tick_pairs = sorted(mapping.items(), key=lambda item: item[1])
+    tickvals = [float(idx) for _, idx in tick_pairs]
+    ticktext = [f"Saros {series}" for series, _ in tick_pairs]
+    return mapping, colorscale, zmin, zmax, tickvals, ticktext
+
+
+def _generate_color_palette(count: int, *, opacity: float) -> List[str]:
+    if count <= 0:
+        return [f"rgba(136, 136, 136, {opacity})"]
+
+    def _format_color(rgb: Tuple[int, int, int]) -> str:
+        r, g, b = rgb
+        return f"rgba({r}, {g}, {b}, {opacity})"
+
+    colors: List[str] = []
+    base_total = len(SAROS_BASE_COLORS)
+    if count <= base_total:
+        colors.extend(_format_color(rgb) for rgb in SAROS_BASE_COLORS[:count])
+        return colors
+
+    colors.extend(_format_color(rgb) for rgb in SAROS_BASE_COLORS)
+    remaining = count - base_total
+    hue = 0.0
+    golden_ratio = 0.6180339887498949
+    for _ in range(remaining):
+        hue = (hue + golden_ratio) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(hue, 0.7, 0.9)
+        colors.append(
+            f"rgba({int(r * 255):d}, {int(g * 255):d}, {int(b * 255):d}, {opacity})"
+        )
+    return colors
+
+
+def _build_discrete_colorscale(colors: List[str]) -> List[List[float | str]]:
+    if not colors:
+        return [[0.0, "#888888"], [1.0, "#888888"]]
+    if len(colors) == 1:
+        return [[0.0, colors[0]], [1.0, colors[0]]]
+    scale: List[List[float | str]] = []
+    total = len(colors)
+    for idx, color in enumerate(colors):
+        start = idx / total
+        end = (idx + 1) / total
+        scale.append([start, color])
+        scale.append([end, color])
+    scale[0][0] = 0.0
+    scale[-1][0] = 1.0
+    return scale
 
 
 def allow_eclipse_type(event: CatalogEntry, include_annular: bool) -> bool:

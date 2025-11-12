@@ -125,6 +125,9 @@ the dataset.
 - `--outline-only`: Emit just the base map outline (useful for confirming the overlay draws correctly).
 - `--colorscale NAME`: Plotly colorscale to encode “years since” (e.g. `Viridis`, `Inferno`, `Turbo`).
 - `--color-exponent X`: Power-law applied to the numeric values before coloring (defaults to `0.5`). Values between `0` and `1` emphasize recent eclipses; values above `1` spread out older ones.
+- `--color-by-saros`: Give every Saros series a distinct color instead of encoding years since (hover text still shows the timing).
+- `--saros-opaque`: When combined with `--color-by-saros`, bump the series colors to full opacity (defaults to 50%).
+- `--saros-colorscale NAME/JSON`: Override the Saros palette (falls back to the built-in discrete colors when omitted).
 - `--include-annular`: Include annular eclipses alongside totals/hybrids (totals-only by default to favor fully dark paths).
 - `--polygon-step N`: Keep every Nth vertex when serializing polygons (use values >1 to shrink HTML/GeoJSON size).
 - `--output FILE`: Destination HTML file for the combined map (default `eclipse_shadow_history.html`; ignored when `--no-html` is set).
@@ -156,6 +159,9 @@ python shadow_forecast.py --samples 160 \
 - `--years-forward N`: Only include eclipses within `N` years of the start date.
 - `--max-events N`: Cap the number of eclipses processed (useful while iterating).
 - `--colorscale NAME` / `--color-exponent X`: Same behavior as `shadow_history.py`, except the color bar reads “years until”.
+- `--color-by-saros`: Assign unique colors per Saros series instead of encoding the wait time (hover text still reports years until).
+- `--saros-opaque`: With `--color-by-saros`, render the Saros palette at full opacity instead of the default translucent fill.
+- `--saros-colorscale NAME/JSON`: Override the Saros palette (defaults to the built-in discrete colors).
 - `--include-annular`: Include annular events (default keeps the focus on total/hybrid eclipses).
 - `--polygon-step N`: Keep every Nth vertex when serializing polygons (use values >1 to shrink HTML/GeoJSON size).
 - `--samples`, `--output`, `--image-output`, `--image-scale`, `--no-html`, and `--outline-only` behave exactly like the history script equivalents.

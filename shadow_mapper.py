@@ -22,6 +22,7 @@ class CatalogEntry:
     year: int
     month: int
     day: int
+    saros: int | None
     eclipse_type: str
     td_ge: str
     td_ge_hours: float
@@ -174,6 +175,8 @@ def load_catalog(path: Path) -> Dict[str, CatalogEntry]:
 def convert_row(raw: Dict[str, str]) -> CatalogEntry:
     td_ge = raw["td_ge"].strip('"')
     td_hours = hms_to_hours(td_ge)
+    saros_raw = (raw.get("saros") or "").strip()
+    saros_value = int(float(saros_raw)) if saros_raw else None
     coeffs = {
         "x": [float(raw[f"x{i}"]) for i in range(4)],
         "y": [float(raw[f"y{i}"]) for i in range(4)],
@@ -187,6 +190,7 @@ def convert_row(raw: Dict[str, str]) -> CatalogEntry:
         year=int(raw["year"]),
         month=int(raw["month"]),
         day=int(raw["day"]),
+        saros=saros_value,
         eclipse_type=raw["eclipse_type"],
         td_ge=td_ge,
         td_ge_hours=td_hours,

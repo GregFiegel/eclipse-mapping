@@ -27,6 +27,7 @@ from shadow_map_utils import (
     date_to_float,
     decimate_polygon,
     format_event_date,
+    prepare_saros_coloring,
     quantize_polygon,
     resolve_future_start,
     scale_years,
@@ -72,6 +73,24 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Exponent applied to years-until values for color scaling. "
             "Values between 0 and 1 compress far-future eclipses, boosting near-term ones."
+        ),
+    )
+    parser.add_argument(
+        "--color-by-saros",
+        action="store_true",
+        help="Assign a unique color to each Saros series instead of encoding wait time.",
+    )
+    parser.add_argument(
+        "--saros-opaque",
+        action="store_true",
+        help="Render Saros colors at full opacity (default 50%% when --color-by-saros is set).",
+    )
+    parser.add_argument(
+        "--saros-colorscale",
+        default=None,
+        help=(
+            "Override the Saros palette. Accepts any Plotly colorscale name or JSON definition. "
+            "Defaults to an internally generated discrete palette."
         ),
     )
     parser.add_argument(
@@ -244,6 +263,7 @@ def main() -> None:
                 "id": feature_id,
                 "value": years_until,
                 "hover": hover,
+                "saros": event.saros,
             }
         )
 
@@ -253,41 +273,67 @@ def main() -> None:
     if not records:
         raise SystemExit("No valid eclipse polygons to plot after filtering.")
 
-    scaled_values = [scale_years(record["value"], args.color_exponent) for record in records]
-    color_min = min(scaled_values)
-    color_max = max(scaled_values)
-    if color_max == color_min:
-        color_max = color_min + 1e-9
-    max_years = max(record["value"] for record in records) if records else 0.0
-    tickvals, ticktext = build_power_colorbar_ticks(max_years, args.color_exponent)
-    exponent_label = f"{args.color_exponent:g}"
-    for record, scaled in zip(records, scaled_values):
-        record["scaled"] = scaled
+    exponent_label = None
+    colorbar_kwargs = None
+    showscale = True
+    colorscale_values: List[List[float | str]] | str
+    if args.color_by_saros:
+        mapping, colorscale, zmin, zmax, tickvals, ticktext = prepare_saros_coloring(
+            [record["saros"] for record in records],
+            full_opacity=args.saros_opaque,
+        )
+        colorscale_values = args.saros_colorscale or colorscale
+        for record in records:
+            record["color_value"] = float(mapping[record["saros"]])
+        colorbar_kwargs = dict(
+            title="Saros series",
+            tickvals=tickvals,
+            ticktext=ticktext,
+        )
+    else:
+        scaled_values = [scale_years(record["value"], args.color_exponent) for record in records]
+        color_min = min(scaled_values)
+        color_max = max(scaled_values)
+        if color_max == color_min:
+            color_max = color_min + 1e-9
+        max_years = max(record["value"] for record in records)
+        tickvals, ticktext = build_power_colorbar_ticks(max_years, args.color_exponent)
+        exponent_label = f"{args.color_exponent:g}"
+        for record, scaled in zip(records, scaled_values):
+            record["color_value"] = scaled
+        zmin = color_min
+        zmax = color_max
+        colorbar_kwargs = dict(
+            title=f"Years until next eclipse (exp {exponent_label})",
+            tickvals=tickvals,
+            ticktext=ticktext,
+        )
+        colorscale_values = args.colorscale
 
     color_records = sorted(records, key=lambda rec: rec["value"], reverse=True)
     hover_records = sorted(records, key=lambda rec: rec["value"])
 
     figure = go.Figure()
+    base_trace_kwargs = dict(
+        featureidkey="id",
+        locations=[rec["id"] for rec in color_records],
+        z=[rec["color_value"] for rec in color_records],
+        zmin=zmin,
+        zmax=zmax,
+        colorscale=colorscale_values,
+        showscale=showscale,
+        hoverinfo="skip",
+        marker=dict(line=dict(color="rgba(0, 0, 0, 0)", width=0)),
+    )
+    if colorbar_kwargs:
+        base_trace_kwargs["colorbar"] = colorbar_kwargs
     figure.add_trace(
         go.Choropleth(
             geojson={
                 "type": "FeatureCollection",
                 "features": [rec["feature"] for rec in color_records],
             },
-            featureidkey="id",
-            locations=[rec["id"] for rec in color_records],
-            z=[rec["scaled"] for rec in color_records],
-            zmin=color_min,
-            zmax=color_max,
-            colorscale=args.colorscale,
-            showscale=True,
-            colorbar=dict(
-                title=f"Years until next eclipse (exp {exponent_label})",
-                tickvals=tickvals,
-                ticktext=ticktext,
-            ),
-            hoverinfo="skip",
-            marker=dict(line=dict(color="rgba(0, 0, 0, 0)", width=0)),
+            **base_trace_kwargs,
         )
     )
     figure.add_trace(
@@ -298,9 +344,9 @@ def main() -> None:
             },
             featureidkey="id",
             locations=[rec["id"] for rec in hover_records],
-            z=[rec["scaled"] for rec in hover_records],
-            zmin=color_min,
-            zmax=color_max,
+            z=[rec["color_value"] for rec in hover_records],
+            zmin=zmin,
+            zmax=zmax,
             colorscale=TRANSPARENT_SCALE,
             showscale=False,
             hoverinfo="text",
@@ -310,12 +356,22 @@ def main() -> None:
     )
     add_world_outline_trace(figure)
 
-    title_lines = [
-        "Time Until Next Total Solar Eclipse",
-        "<sup>Darker colors = sooner eclipses for that location</sup>",
-        f"<sup>Power color scale (exp {exponent_label}) highlights near-term coverage</sup>",
-        f"<sup>Forecast window starts {start_label}</sup>",
-    ]
+    base_title = "Time Until Next Total Solar Eclipse"
+    title_lines = []
+    if args.color_by_saros:
+        base_title = "Saros Series Coverage (Forecast)"
+        title_lines.append(
+            "<sup>Colors distinguish Saros series; hover text shows the series number</sup>"
+        )
+    else:
+        title_lines.extend(
+            [
+                "<sup>Darker colors = sooner eclipses for that location</sup>",
+                f"<sup>Power color scale (exp {exponent_label}) highlights near-term coverage</sup>",
+            ]
+        )
+    title_lines.insert(0, base_title)
+    title_lines.append(f"<sup>Forecast window starts {start_label}</sup>")
     if end_label:
         title_lines.append(f"<sup>Forecast capped at {end_label}</sup>")
     if years_window_label:
